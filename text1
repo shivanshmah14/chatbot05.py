@@ -1,0 +1,71 @@
+import streamlit as st
+import pandas as pd
+import numpy as np
+
+st.set_page_config(page_title="Detailed Analytics", page_icon="📈", layout="wide")
+
+st.title("📈 Detailed Analytics Dashboard")
+st.markdown("*Deep dive into your AI assistant usage patterns*")
+
+# Generate sample performance data
+@st.cache_data
+def generate_performance_data():
+    """Generate detailed performance metrics"""
+    dates = pd.date_range(start='2024-10-01', periods=50, freq='D')
+    data = {
+        'Date': dates,
+        'Questions': np.random.randint(5, 30, 50),
+        'Avg Response Time': np.random.uniform(1.5, 4.0, 50),
+        'User Satisfaction': np.random.uniform(3.5, 5.0, 50)
+    }
+    return pd.DataFrame(data)
+
+# Widget 5: Date range selector
+st.sidebar.header("Filter Options")
+date_range = st.sidebar.date_input(
+    "Select Date Range",
+    value=(pd.to_datetime('2024-10-01'), pd.to_datetime('2024-11-19'))
+)
+
+# Widget 6: Metric selector
+selected_metric = st.sidebar.radio(
+    "Select Metric to Display",
+    options=["Questions", "Avg Response Time", "User Satisfaction"]
+)
+
+# Load data
+df = generate_performance_data()
+
+# Display metrics
+col1, col2, col3, col4 = st.columns(4)
+with col1:
+    st.metric("Total Questions", f"{df['Questions'].sum():,}", "+12%")
+with col2:
+    st.metric("Avg Response Time", f"{df['Avg Response Time'].mean():.2f}s", "-0.3s")
+with col3:
+    st.metric("Satisfaction Score", f"{df['User Satisfaction'].mean():.2f}/5", "+0.2")
+with col4:
+    st.metric("Active Days", len(df), "+5")
+
+# Main visualization
+st.subheader(f"{selected_metric} Over Time")
+chart_data = df.set_index('Date')[selected_metric]
+st.line_chart(chart_data)
+
+# Detailed table
+st.subheader("Detailed Data Table")
+st.dataframe(
+    df.style.highlight_max(axis=0, color='lightgreen'),
+    use_container_width=True,
+    hide_index=True
+)
+
+# Download button (Widget 7)
+csv = df.to_csv(index=False)
+st.download_button(
+    label="📥 Download Full Report",
+    data=csv,
+    file_name="shiva_ai_analytics.csv",
+    mime="text/csv",
+    use_container_width=True
+)
