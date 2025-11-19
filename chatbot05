@@ -1,0 +1,271 @@
+import streamlit as st
+import pandas as pd
+import numpy as np
+import uuid
+import os
+import requests
+import tempfile
+from datetime import datetime
+
+# ========================================
+# PAGE CONFIGURATION
+# ========================================
+st.set_page_config(
+    page_title="Shiva AI Assistant",
+    page_icon="🤖",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+# ========================================
+# CONFIGURATION & CONSTANTS
+# ========================================
+API_KEY = os.getenv("CHATBOT_API_KEY", "")  # Never hardcode keys!
+MODEL = "sarvam-m"
+SYSTEM_PROMPT = (
+    "You are Shiva AI, a helpful assistant with a calm Indian tone. "
+    "You can explain and solve maths and physics problems using clear, neat formatting. "
+    "Use simple language, and write x² instead of x^2."
+)
+
+# ========================================
+# SESSION STATE INITIALIZATION
+# ========================================
+if "messages" not in st.session_state:
+    st.session_state.messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+if "session_id" not in st.session_state:
+    st.session_state.session_id = str(uuid.uuid4())
+if "conversation_history" not in st.session_state:
+    st.session_state.conversation_history = []
+
+# ========================================
+# CACHED DATA FUNCTIONS
+# ========================================
+@st.cache_data
+def load_sample_data():
+    """Load sample conversation statistics data"""
+    data = {
+        'Topic': ['Math', 'Physics', 'General', 'Coding', 'Other'],
+        'Questions': [45, 32, 28, 15, 10],
+        'Avg Response Time (s)': [2.3, 2.8, 1.5, 3.2, 1.8]
+    }
+    return pd.DataFrame(data)
+
+@st.cache_data
+def generate_usage_stats():
+    """Generate sample usage statistics over time"""
+    dates = pd.date_range(start='2024-01-01', end='2024-12-31', freq='W')
+    usage = np.random.randint(10, 100, size=len(dates))
+    return pd.DataFrame({'Date': dates, 'Conversations': usage})
+
+# ========================================
+# HELPER FUNCTIONS
+# ========================================
+def call_ai_api(messages):
+    """Call the Sarvam AI API with error handling"""
+    try:
+        if not API_KEY:
+            return "⚠️ API key not configured. Please set CHATBOT_API_KEY in Streamlit secrets."
+        
+        messages_for_api = [{"role": "system", "content": SYSTEM_PROMPT}]
+        for m in messages:
+            if m["role"] != "system":
+                messages_for_api.append({"role": m["role"], "content": m["content"]})
+
+        payload = {"model": MODEL, "messages": messages_for_api}
+        headers = {
+            "Authorization": f"Bearer {API_KEY}",
+            "Content-Type": "application/json"
+        }
+        url = "https://api.sarvam.ai/v1/chat/completions"
+
+        resp = requests.post(url, headers=headers, json=payload, timeout=60)
+        
+        if resp.status_code != 200:
+            return f"[Error {resp.status_code}] {resp.text}"
+        
+        data = resp.json()
+        return data.get("choices", [{}])[0].get("message", {}).get("content", "No reply.")
+    
+    except Exception as e:
+        return f"[Error] {str(e)}"
+
+def save_conversation_to_history(user_msg, ai_msg):
+    """Save conversation pair to history for analytics"""
+    st.session_state.conversation_history.append({
+        'timestamp': datetime.now(),
+        'user': user_msg,
+        'assistant': ai_msg,
+        'session_id': st.session_state.session_id
+    })
+
+# ========================================
+# MAIN APP LAYOUT
+# ========================================
+st.title("🤖 Shiva AI Assistant")
+st.markdown("*Your intelligent companion for math, physics, and general questions*")
+
+# ========================================
+# SIDEBAR - CONTROLS & SETTINGS
+# ========================================
+with st.sidebar:
+    st.header("⚙️ Controls")
+    
+    # Widget 1: Temperature slider
+    temperature = st.slider(
+        "Response Creativity",
+        min_value=0.0,
+        max_value=1.0,
+        value=0.7,
+        step=0.1,
+        help="Higher values make responses more creative but less focused"
+    )
+    
+    # Widget 2: Response length selector
+    max_tokens = st.selectbox(
+        "Response Length",
+        options=[500, 1000, 2000],
+        index=1,
+        help="Maximum length of AI responses"
+    )
+    
+    # Widget 3: Topic filter
+    topic_filter = st.multiselect(
+        "Preferred Topics",
+        options=["Math", "Physics", "Coding", "General Knowledge", "Language"],
+        default=["Math", "Physics"],
+        help="Select topics you're most interested in"
+    )
+    
+    st.divider()
+    
+    # Session info
+    st.markdown("### 📊 Session Info")
+    st.write(f"**Messages:** {len(st.session_state.messages) - 1}")
+    st.write(f"**Session ID:** `{st.session_state.session_id[:8]}...`")
+    
+    # Clear conversation button
+    if st.button("🧹 Clear Conversation", use_container_width=True):
+        st.session_state.messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+        st.rerun()
+    
+    # Export conversation button (Widget 4)
+    if st.button("💾 Export Chat", use_container_width=True):
+        if len(st.session_state.messages) > 1:
+            export_df = pd.DataFrame([
+                {"Role": m["role"], "Content": m["content"]}
+                for m in st.session_state.messages
+                if m["role"] != "system"
+            ])
+            csv = export_df.to_csv(index=False)
+            st.download_button(
+                "Download CSV",
+                csv,
+                "conversation.csv",
+                "text/csv",
+                use_container_width=True
+            )
+
+# ========================================
+# MAIN CONTENT AREA
+# ========================================
+tab1, tab2, tab3 = st.tabs(["💬 Chat", "📊 Analytics", "ℹ️ About"])
+
+# TAB 1: CHAT INTERFACE
+with tab1:
+    # Display conversation history
+    chat_container = st.container()
+    with chat_container:
+        for msg in st.session_state.messages:
+            if msg["role"] == "system":
+                continue
+            with st.chat_message(msg["role"]):
+                st.write(msg["content"])
+
+    # Chat input
+    user_message = st.chat_input("Ask me anything about math, physics, or general topics...")
+
+    # Process user message
+    if user_message:
+        # Add user message
+        st.session_state.messages.append({"role": "user", "content": user_message})
+        
+        with st.chat_message("user"):
+            st.write(user_message)
+        
+        # Get AI response
+        with st.chat_message("assistant"):
+            with st.spinner("🤔 Thinking..."):
+                response_text = call_ai_api(st.session_state.messages)
+            st.write(response_text)
+        
+        # Save to session
+        st.session_state.messages.append({"role": "assistant", "content": response_text})
+        save_conversation_to_history(user_message, response_text)
+        st.rerun()
+
+# TAB 2: ANALYTICS & DATA VISUALIZATION
+with tab2:
+    st.header("📊 Conversation Analytics")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.subheader("Topic Distribution")
+        topic_data = load_sample_data()
+        st.dataframe(topic_data, use_container_width=True, hide_index=True)
+        st.bar_chart(topic_data.set_index('Topic')['Questions'])
+    
+    with col2:
+        st.subheader("Response Times")
+        st.bar_chart(topic_data.set_index('Topic')['Avg Response Time (s)'])
+    
+    st.divider()
+    
+    st.subheader("Usage Trends Over Time")
+    usage_data = generate_usage_stats()
+    st.line_chart(usage_data.set_index('Date')['Conversations'])
+    
+    # Show current session statistics
+    if len(st.session_state.conversation_history) > 0:
+        st.subheader("Current Session Statistics")
+        session_df = pd.DataFrame(st.session_state.conversation_history)
+        st.write(f"**Total exchanges:** {len(session_df)}")
+        st.write(f"**Average user message length:** {session_df['user'].str.len().mean():.0f} characters")
+        st.dataframe(session_df[['timestamp', 'user', 'assistant']].tail(5))
+
+# TAB 3: ABOUT
+with tab3:
+    st.header("ℹ️ About Shiva AI")
+    
+    st.markdown("""
+    ### Features
+    - 🧮 **Math & Physics Help**: Solve complex problems with step-by-step explanations
+    - 💬 **Natural Conversations**: Powered by advanced AI with Indian English tone
+    - 📊 **Analytics Dashboard**: Track your learning journey
+    - 💾 **Export Conversations**: Download your chat history as CSV
+    - ⚙️ **Customizable**: Adjust response creativity and length
+    
+    ### Technology Stack
+    - **Frontend**: Streamlit
+    - **AI Model**: Sarvam AI (sarvam-m)
+    - **Data Processing**: Pandas, NumPy
+    - **Deployment**: Streamlit Community Cloud
+    
+    ### How to Use
+    1. Type your question in the chat box
+    2. Adjust settings in the sidebar for personalized responses
+    3. View analytics to track your learning progress
+    4. Export conversations for future reference
+    
+    ### Version
+    v1.0.0 - Built for S6 Streamlit Project
+    """)
+    
+    st.info("💡 **Tip**: Use the sidebar controls to customize your experience!")
+
+# ========================================
+# FOOTER
+# ========================================
+st.divider()
+st.caption("Shiva AI — Your Personal Learning Assistant | Built with ❤️ using Streamlit")
